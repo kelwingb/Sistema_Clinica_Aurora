@@ -81,6 +81,10 @@ router.get('/', async (req: Request, res: Response) => {
 router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const { data_hora, hora_inicio, hora_fim, vagas_totais, medico_id } = req.body;
 
+  if (!req.user) {
+    return res.status(401).json({ error: 'Não autorizado', message: 'Sessão inválida.' });
+  }
+
   if (!data_hora || !medico_id) {
     return res.status(400).json({ error: 'Campos incorretos', message: 'Data e Identificador do Médico são obrigatórios.' });
   }
