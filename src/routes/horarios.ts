@@ -4,6 +4,11 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 
 const router = Router();
 
+/**
+ * GET /api/horarios
+ * Público: Lista horários/turnos disponíveis ou filtrados por médico
+ * Resiliente: funciona tanto com o schema novo (colunas extras) quanto com o legado
+ */
 router.get('/', async (req: Request, res: Response) => {
   const { medico_id, apenas_disponiveis } = req.query;
 
@@ -15,37 +20,42 @@ router.get('/', async (req: Request, res: Response) => {
       whereClause.medico_id = Number(medico_id);
     }
 
-    if (apenas_disponiveis === 'true') {
-      whereClause.status_disponivel = true;
-    }
-
     let horarios: any[] = [];
+    const includeQuery: any = {
+      medico: { select: { id: true, nome: true, especialidade: true } }
+    };
+
     try {
+      // Tenta buscar incluindo agendamentos e status_disponivel (schema novo)
+      const fullWhere = { ...whereClause };
+      if (apenas_disponiveis === 'true') {
+        fullWhere.status_disponivel = true;
+      }
       horarios = await prisma.horario.findMany({
-        where: whereClause,
+        where: fullWhere,
         include: {
-          medico: { select: { id: true, nome: true, especialidade: true } },
+          ...includeQuery,
           agendamentos: { select: { id: true, nome_paciente: true, telefone: true } }
         },
         orderBy: { data_hora: 'asc' }
       });
     } catch (dbErr: any) {
-      const legacyHorarios = await prisma.horario.findMany({
-        where: whereClause,
-        include: {
-          medico: { select: { id: true, nome: true, especialidade: true } }
-        },
-        orderBy: { data_hora: 'asc' }
-      });
-
-      horarios = legacyHorarios.map((h: any) => ({
-        ...h,
-        hora_inicio: h.hora_inicio || '07:00',
-        hora_fim: h.hora_fim || '11:00',
-        vagas_totais: h.vagas_totais ?? 1,
-        vagas_disponiveis: h.vagas_disponiveis ?? (h.status_disponivel ? 1 : 0),
-        agendamentos: h.agendamentos || []
-      }));
+      console.warn('Falha na busca completa de horários, tentando modo legado:', dbErr?.message);
+      try {
+        // Fallback legado: sem agendamentos e sem status_disponivel no where
+        horarios = await prisma.horario.findMany({
+          where: whereClause,
+          include: includeQuery,
+          orderBy: { data_hora: 'asc' }
+        });
+      } catch (dbErr2: any) {
+        console.error('Falha também no modo legado:', dbErr2?.message);
+        // Último fallback: busca mínima sem includes
+        horarios = await prisma.horario.findMany({
+          where: whereClause,
+          orderBy: { data_hora: 'asc' }
+        });
+      }
     }
 
     const result = horarios.map((h: any) => ({
@@ -71,6 +81,7 @@ router.get('/', async (req: Request, res: Response) => {
 /**
  * POST /api/horarios
  * Protegido: Cria um novo turno/bloco de atendimento para um médico determinado
+ * Resiliente: tenta inserir com o schema completo e faz fallback progressivo
  */
 router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const { data_hora, hora_inicio, hora_fim, vagas_totais, medico_id } = req.body;
@@ -88,7 +99,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
   try {
     const prisma = getPrisma();
-    
+
     // Valida se o médico existe
     const medico = await prisma.medico.findUnique({
       where: { id: Number(medico_id) }
@@ -100,6 +111,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
     let horario;
     try {
+      // Tenta inserir com todos os campos (schema novo)
       horario = await prisma.horario.create({
         data: {
           data_hora: dateObj,
@@ -112,13 +124,29 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         }
       });
     } catch (createErr: any) {
-      horario = await prisma.horario.create({
-        data: {
-          data_hora: dateObj,
-          medico_id: Number(medico_id),
-          status_disponivel: true
-        } as any
-      });
+      console.warn('Falha no insert completo do horário, tentando insert intermediário:', createErr?.message);
+      try {
+        // Fallback 1: Sem status_disponivel (caso a coluna não exista no schema antigo)
+        horario = await prisma.horario.create({
+          data: {
+            data_hora: dateObj,
+            hora_inicio: hora_inicio || '07:00',
+            hora_fim: hora_fim || '11:00',
+            vagas_totais: numVagas,
+            vagas_disponiveis: numVagas,
+            medico_id: Number(medico_id)
+          } as any
+        });
+      } catch (err2: any) {
+        console.warn('Falha no insert intermediário, tentando insert mínimo total:', err2?.message);
+        // Fallback 2: Apenas os campos essenciais (compatível com schema original)
+        horario = await prisma.horario.create({
+          data: {
+            data_hora: dateObj,
+            medico_id: Number(medico_id)
+          } as any
+        });
+      }
     }
 
     return res.status(201).json(horario);
