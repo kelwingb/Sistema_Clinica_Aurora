@@ -4,6 +4,9 @@ import authRouter from "../src/routes/auth.js";
 import medicosRouter from "../src/routes/medicos.js";
 import horariosRouter from "../src/routes/horarios.js";
 import agendamentosRouter from "../src/routes/agendamentos.js";
+import pacientesRouter from "../src/routes/pacientes.js";
+import examesRouter from "../src/routes/exames.js";
+import checkupsRouter from "../src/routes/checkups.js";
 import { getPrisma } from "../src/db/prisma.js";
 
 const app = express();
@@ -66,6 +69,9 @@ app.use("/api/auth", authRouter);
 app.use("/api/medicos", medicosRouter);
 app.use("/api/horarios", horariosRouter);
 app.use("/api/agendamentos", agendamentosRouter);
+app.use("/api/pacientes", pacientesRouter);
+app.use("/api/exames", examesRouter);
+app.use("/api/checkups", checkupsRouter);
 
 // Handler global de erros para evitar retorno de HTML no frontend
 app.use((err: any, req: any, res: any, next: any) => {

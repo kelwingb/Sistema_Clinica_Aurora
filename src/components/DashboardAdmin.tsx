@@ -35,16 +35,22 @@ interface EditingMedicoState extends Medico {
 interface Horario {
   id: number;
   data_hora: string;
+  hora_inicio?: string;
+  hora_fim?: string;
+  vagas_totais?: number;
+  vagas_disponiveis?: number;
   medico_id: number;
   status_disponivel: boolean;
   medico: {
+    id?: number;
     nome: string;
     especialidade: string;
   };
-  agendamento?: {
+  agendamentos?: {
+    id: number;
     nome_paciente: string;
     telefone: string;
-  };
+  }[];
 }
 
 interface Agendamento {
@@ -128,9 +134,13 @@ export const DashboardAdmin: React.FC = () => {
   const [cropModalSrc, setCropModalSrc] = useState<string | null>(null);
   const [cropTargetMode, setCropTargetMode] = useState<'novo' | 'edit'>('novo');
 
-  // Formulário: Cadastrar Horário para Médico
+  // Formulário: Cadastrar Horário para Médico (Turnos com Vagas)
   const [novoHorarioData, setNovoHorarioData] = useState('');
   const [novoHorarioMedico, setNovoHorarioMedico] = useState('');
+  const [novoHorarioTipoTurno, setNovoHorarioTipoTurno] = useState('13:00-17:00');
+  const [novoHorarioInicio, setNovoHorarioInicio] = useState('13:00');
+  const [novoHorarioFim, setNovoHorarioFim] = useState('17:00');
+  const [novoHorarioVagas, setNovoHorarioVagas] = useState<number>(11);
 
   const [mensagemSucesso, setMensagemSucesso] = useState<string | null>(null);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
@@ -632,6 +642,17 @@ export const DashboardAdmin: React.FC = () => {
     e.preventDefault();
     if (!novoHorarioData || !novoHorarioMedico) return;
 
+    let hInicio = novoHorarioInicio;
+    let hFim = novoHorarioFim;
+
+    if (novoHorarioTipoTurno !== 'CUSTOM') {
+      const parts = novoHorarioTipoTurno.split('-');
+      if (parts.length === 2) {
+        hInicio = parts[0];
+        hFim = parts[1];
+      }
+    }
+
     try {
       const response = await fetch('/api/horarios', {
         method: 'POST',
@@ -641,17 +662,20 @@ export const DashboardAdmin: React.FC = () => {
         },
         body: JSON.stringify({
           data_hora: novoHorarioData,
+          hora_inicio: hInicio,
+          hora_fim: hFim,
+          vagas_totais: Number(novoHorarioVagas) || 1,
           medico_id: Number(novoHorarioMedico)
         })
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.message || 'Erro ao criar horário.');
+        throw new Error(errorData.message || 'Erro ao criar turno.');
       }
 
       setNovoHorarioData('');
-      triggerFeedback('Novo horário vago inserido com sucesso!');
+      triggerFeedback('Novo turno de atendimento liberado com sucesso!');
       fetchHorariosData();
     } catch (err: any) {
       setMensagemErro(err.message);
@@ -1356,52 +1380,78 @@ export const DashboardAdmin: React.FC = () => {
               {/* ABA: HORARIOS */}
               {activeTab === 'horarios' && (
                 <div className="bg-white rounded-2xl border border-slate-200/60 shadow-xs p-6">
-                  <h3 className="text-sm font-bold uppercase text-[#0A2B2A] tracking-wider mb-4 border-b pb-2">Grade Completa de Horários</h3>
+                  <h3 className="text-sm font-bold uppercase text-[#0A2B2A] tracking-wider mb-4 border-b pb-2">Grade de Turnos e Vagas Liberadas</h3>
                   
                   {horarios.length === 0 ? (
-                    <p className="text-center py-12 text-xs text-slate-400 font-mono">Não há horários salvos na grade.</p>
+                    <p className="text-center py-12 text-xs text-slate-400 font-mono">Não há turnos salvos na grade.</p>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
                         <thead>
                           <tr className="border-b text-slate-400 font-bold uppercase">
-                            <th className="py-2.5">Data & Hora</th>
+                            <th className="py-2.5">Data & Turno</th>
                             <th className="py-2.5">Médico Responsável</th>
-                            <th className="py-2.5">Status</th>
+                            <th className="py-2.5">Vagas & Disponibilidade</th>
+                            <th className="py-2.5">Pacientes Agendados</th>
                             <th className="py-2.5 text-center">Ações</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {horarios.map((hor) => (
-                            <tr key={hor.id} className="hover:bg-slate-50/50">
-                              <td className="py-3 font-semibold text-slate-800 font-mono">{formatarData(hor.data_hora)}</td>
-                              <td className="py-3">
-                                <p className="font-semibold text-slate-800">{hor.medico?.nome}</p>
-                                <p className="text-[9px] text-[#C5A880]">{hor.medico?.especialidade}</p>
-                              </td>
-                              <td className="py-3">
-                                {hor.status_disponivel ? (
-                                  <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold uppercase px-2 py-0.5 rounded-full">Disponível</span>
-                                ) : (
-                                  <div>
-                                    <span className="text-[10px] bg-amber-50 text-amber-700 font-bold uppercase px-2 py-0.5 rounded-full inline-block">Reservado</span>
-                                    {hor.agendamento && (
-                                      <p className="text-[9px] text-slate-400 mt-0.5 font-mono">Pact: {hor.agendamento.nome_paciente}</p>
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="py-3 text-center">
-                                <button
-                                  onClick={() => handleExcluirHorario(hor.id)}
-                                  className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-1.5 rounded-lg transition-all"
-                                  title="Remover Horário"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
+                          {horarios.map((hor) => {
+                            const isEsgotado = (hor.vagas_disponiveis ?? 0) <= 0 || !hor.status_disponivel;
+                            const totalVagas = hor.vagas_totais ?? 1;
+                            const dispVagas = hor.vagas_disponiveis ?? (hor.status_disponivel ? 1 : 0);
+
+                            return (
+                              <tr key={hor.id} className="hover:bg-slate-50/50">
+                                <td className="py-3 font-semibold text-slate-800 font-mono">
+                                  <p>{formatarData(hor.data_hora)}</p>
+                                  <p className="text-[11px] text-[#0A2B2A] font-sans font-bold">
+                                    {hor.hora_inicio || '07:00'} às {hor.hora_fim || '11:00'} hs
+                                  </p>
+                                </td>
+                                <td className="py-3">
+                                  <p className="font-semibold text-slate-800">{hor.medico?.nome}</p>
+                                  <p className="text-[9px] text-[#C5A880]">{hor.medico?.especialidade}</p>
+                                </td>
+                                <td className="py-3">
+                                  {isEsgotado ? (
+                                    <span className="text-[10px] bg-red-100 text-red-700 font-extrabold uppercase px-2.5 py-1 rounded-full inline-block">
+                                      Esgotado (0 Vagas)
+                                    </span>
+                                  ) : (
+                                    <div>
+                                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-extrabold uppercase px-2.5 py-1 rounded-full inline-block">
+                                        {dispVagas} de {totalVagas} vagas livres
+                                      </span>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-3">
+                                  {hor.agendamentos && hor.agendamentos.length > 0 ? (
+                                    <div className="space-y-1 max-h-20 overflow-y-auto">
+                                      {hor.agendamentos.map((ag) => (
+                                        <p key={ag.id} className="text-[11px] text-slate-700 font-medium bg-slate-100 px-2 py-0.5 rounded-md inline-block mr-1 mb-1">
+                                          👤 {ag.nome_paciente} ({ag.telefone})
+                                        </p>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="text-[10px] text-slate-400 italic">Nenhum paciente agendado</p>
+                                  )}
+                                </td>
+                                <td className="py-3 text-center">
+                                  <button
+                                    onClick={() => handleExcluirHorario(hor.id)}
+                                    className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 p-1.5 rounded-lg transition-all"
+                                    title="Remover Turno da Grade"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1543,19 +1593,19 @@ export const DashboardAdmin: React.FC = () => {
                 </form>
               </div>
 
-              {/* FORMULÁRIO: CADASTRAR HORÁRIO */}
+              {/* FORMULÁRIO: CADASTRAR TURNO DE ATENDIMENTO COM VAGAS */}
               <div className="bg-white rounded-2xl border border-slate-200/60 shadow-xs p-6">
                 <div className="flex items-center space-x-2 mb-4 border-b pb-2">
                   <Calendar className="w-4 h-4 text-[#0A2B2A]" />
-                  <h3 className="font-serif font-bold text-[#0A2B2A] text-xs uppercase tracking-wider">Novo Horário Vago</h3>
+                  <h3 className="font-serif font-bold text-[#0A2B2A] text-xs uppercase tracking-wider">Liberar Turno de Atendimento</h3>
                 </div>
 
                 {medicos.length === 0 ? (
-                  <p className="text-[10px] text-slate-400 font-mono">Cadastre ao menos um médico para criar horários.</p>
+                  <p className="text-[10px] text-slate-400 font-mono">Cadastre ao menos um médico para criar turnos.</p>
                 ) : (
                   <form onSubmit={handleCriarHorario} className="space-y-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Médico Associado</label>
+                      <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Médico Associado *</label>
                       <select
                         required
                         value={novoHorarioMedico}
@@ -1572,9 +1622,9 @@ export const DashboardAdmin: React.FC = () => {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Data & Hora Selecionadas</label>
+                      <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Data do Atendimento *</label>
                       <input
-                        type="datetime-local"
+                        type="date"
                         required
                         value={novoHorarioData}
                         onChange={(e) => setNovoHorarioData(e.target.value)}
@@ -1582,12 +1632,66 @@ export const DashboardAdmin: React.FC = () => {
                       />
                     </div>
 
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Horário / Turno de Atendimento *</label>
+                      <select
+                        value={novoHorarioTipoTurno}
+                        onChange={(e) => setNovoHorarioTipoTurno(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 text-xs rounded-lg p-2.5 focus:border-[#0A2B2A] focus:bg-white outline-none font-medium"
+                      >
+                        <option value="13:00-17:00">13:00 às 17:00 hs (Tarde)</option>
+                        <option value="07:00-11:00">07:00 às 11:00 hs (Manhã)</option>
+                        <option value="18:00-22:00">18:00 às 22:00 hs (Noite)</option>
+                        <option value="CUSTOM">Outro Horário (Personalizado)</option>
+                      </select>
+                    </div>
+
+                    {novoHorarioTipoTurno === 'CUSTOM' && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Hora Início</label>
+                          <input
+                            type="time"
+                            required
+                            value={novoHorarioInicio}
+                            onChange={(e) => setNovoHorarioInicio(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 text-xs rounded-lg p-2 focus:border-[#0A2B2A] outline-none"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Hora Fim</label>
+                          <input
+                            type="time"
+                            required
+                            value={novoHorarioFim}
+                            onChange={(e) => setNovoHorarioFim(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 text-xs rounded-lg p-2 focus:border-[#0A2B2A] outline-none"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase tracking-wider text-slate-500 font-bold block">Número de Vagas Disponíveis *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        required
+                        value={novoHorarioVagas}
+                        onChange={(e) => setNovoHorarioVagas(Number(e.target.value))}
+                        placeholder="Ex: 11"
+                        className="w-full bg-slate-50 border border-slate-200 text-xs rounded-lg p-2.5 focus:border-[#0A2B2A] focus:bg-white outline-none font-bold"
+                      />
+                      <p className="text-[9px] text-slate-400">* Define quantos pacientes podem agendar neste turno.</p>
+                    </div>
+
                     <button
                       type="submit"
-                      className="w-full bg-[#0A2B2A] hover:bg-[#134241] text-[#FAF8F5] py-2 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2"
+                      className="w-full bg-[#0A2B2A] hover:bg-[#134241] text-[#FAF8F5] py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 shadow-xs"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>Cadastrar na Grade</span>
+                      <span>Liberar Turno na Grade</span>
                     </button>
                   </form>
                 )}

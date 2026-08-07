@@ -6,7 +6,7 @@ const router = Router();
 
 /**
  * GET /api/horarios
- * Público: Lista horários disponíveis ou filtrados por médico
+ * Público: Lista horários/turnos disponíveis ou filtrados por médico
  */
 router.get('/', async (req: Request, res: Response) => {
   const { medico_id, apenas_disponiveis } = req.query;
@@ -21,6 +21,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (apenas_disponiveis === 'true') {
       whereClause.status_disponivel = true;
+      whereClause.vagas_disponiveis = { gt: 0 };
     }
 
     const horarios = await prisma.horario.findMany({
@@ -28,13 +29,17 @@ router.get('/', async (req: Request, res: Response) => {
       select: {
         id: true,
         data_hora: true,
+        hora_inicio: true,
+        hora_fim: true,
+        vagas_totais: true,
+        vagas_disponiveis: true,
         medico_id: true,
         status_disponivel: true,
         medico: {
-          select: { nome: true, especialidade: true }
+          select: { id: true, nome: true, especialidade: true }
         },
-        agendamento: {
-          select: { nome_paciente: true, telefone: true }
+        agendamentos: {
+          select: { id: true, nome_paciente: true, telefone: true }
         }
       },
       orderBy: {
@@ -51,14 +56,16 @@ router.get('/', async (req: Request, res: Response) => {
 
 /**
  * POST /api/horarios
- * Protegido: Cria novos horários para um médico determinado
+ * Protegido: Cria um novo turno/bloco de atendimento para um médico determinado
  */
 router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-  const { data_hora, medico_id } = req.body;
+  const { data_hora, hora_inicio, hora_fim, vagas_totais, medico_id } = req.body;
 
   if (!data_hora || !medico_id) {
-    return res.status(400).json({ error: 'Campos incorretos', message: 'Data/Hora e Identificador do Médico são obrigatórios.' });
+    return res.status(400).json({ error: 'Campos incorretos', message: 'Data e Identificador do Médico são obrigatórios.' });
   }
+
+  const numVagas = Math.max(1, Number(vagas_totais) || 1);
 
   try {
     const prisma = getPrisma();
@@ -75,6 +82,10 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
     const horario = await prisma.horario.create({
       data: {
         data_hora: new Date(data_hora),
+        hora_inicio: hora_inicio || '07:00',
+        hora_fim: hora_fim || '11:00',
+        vagas_totais: numVagas,
+        vagas_disponiveis: numVagas,
         medico_id: Number(medico_id),
         status_disponivel: true
       }
@@ -89,7 +100,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
 /**
  * DELETE /api/horarios/:id
- * Protegido: Remove um determinado horário
+ * Protegido: Remove um determinado turno/horário
  */
 router.delete('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
