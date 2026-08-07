@@ -21,11 +21,12 @@ export const PublicAgendar: React.FC = () => {
   const initialType = queryParams.get('tipo');
   const initialCheckupId = queryParams.get('checkupId');
 
-  const { data: medicos, isLoading: isLoadingMedicos } = useSWR('/api/medicos', fetcher);
-  const { data: horariosDisponiveis, isLoading: isLoadingHorarios } = useSWR('/api/horarios?apenas_disponiveis=true', fetcher);
-  const { data: checkups, isLoading: isLoadingCheckups } = useSWR('/api/checkups', fetcher);
-  const { data: examesImagem, isLoading: isLoadingImagens } = useSWR('/api/exames/imagem', fetcher);
-  const { data: examesLab, isLoading: isLoadingLab } = useSWR('/api/exames/laboratorial', fetcher);
+  const swrConfig = { shouldRetryOnError: false, revalidateOnFocus: false };
+  const { data: medicos, isLoading: isLoadingMedicos } = useSWR('/api/medicos', fetcher, swrConfig);
+  const { data: horariosDisponiveis, isLoading: isLoadingHorarios } = useSWR('/api/horarios?apenas_disponiveis=true', fetcher, swrConfig);
+  const { data: checkups, isLoading: isLoadingCheckups } = useSWR('/api/checkups', fetcher, swrConfig);
+  const { data: examesImagem, isLoading: isLoadingImagens } = useSWR('/api/exames/imagem', fetcher, swrConfig);
+  const { data: examesLab, isLoading: isLoadingLab } = useSWR('/api/exames/laboratorial', fetcher, swrConfig);
 
   const isLoading = isLoadingMedicos || isLoadingHorarios || isLoadingCheckups || isLoadingImagens || isLoadingLab;
 

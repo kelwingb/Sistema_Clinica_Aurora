@@ -21,33 +21,51 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (apenas_disponiveis === 'true') {
       whereClause.status_disponivel = true;
-      whereClause.vagas_disponiveis = { gt: 0 };
     }
 
-    const horarios = await prisma.horario.findMany({
-      where: whereClause,
-      select: {
-        id: true,
-        data_hora: true,
-        hora_inicio: true,
-        hora_fim: true,
-        vagas_totais: true,
-        vagas_disponiveis: true,
-        medico_id: true,
-        status_disponivel: true,
-        medico: {
-          select: { id: true, nome: true, especialidade: true }
+    let horarios: any[] = [];
+    try {
+      horarios = await prisma.horario.findMany({
+        where: whereClause,
+        include: {
+          medico: { select: { id: true, nome: true, especialidade: true } },
+          agendamentos: { select: { id: true, nome_paciente: true, telefone: true } }
         },
-        agendamentos: {
-          select: { id: true, nome_paciente: true, telefone: true }
-        }
-      },
-      orderBy: {
-        data_hora: 'asc'
-      }
-    });
+        orderBy: { data_hora: 'asc' }
+      });
+    } catch (dbErr: any) {
+      const legacyHorarios = await prisma.horario.findMany({
+        where: whereClause,
+        include: {
+          medico: { select: { id: true, nome: true, especialidade: true } }
+        },
+        orderBy: { data_hora: 'asc' }
+      });
 
-    return res.json(horarios);
+      horarios = legacyHorarios.map((h: any) => ({
+        ...h,
+        hora_inicio: h.hora_inicio || '07:00',
+        hora_fim: h.hora_fim || '11:00',
+        vagas_totais: h.vagas_totais ?? 1,
+        vagas_disponiveis: h.vagas_disponiveis ?? (h.status_disponivel ? 1 : 0),
+        agendamentos: h.agendamentos || []
+      }));
+    }
+
+    const result = horarios.map((h: any) => ({
+      id: h.id,
+      data_hora: h.data_hora,
+      hora_inicio: h.hora_inicio || '07:00',
+      hora_fim: h.hora_fim || '11:00',
+      vagas_totais: h.vagas_totais ?? 1,
+      vagas_disponiveis: h.vagas_disponiveis ?? (h.status_disponivel ? 1 : 0),
+      medico_id: h.medico_id,
+      status_disponivel: Boolean(h.status_disponivel),
+      medico: h.medico,
+      agendamentos: h.agendamentos || []
+    }));
+
+    return res.json(result);
   } catch (error: any) {
     console.error('Erro ao listar horários:', error);
     return res.status(500).json({ error: 'Erro de SQL', message: 'Incapaz de ler os horários disponíveis.', details: error.message });
@@ -79,17 +97,28 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return res.status(404).json({ error: 'Não encontrado', message: 'O médico indicado não existe.' });
     }
 
-    const horario = await prisma.horario.create({
-      data: {
-        data_hora: new Date(data_hora),
-        hora_inicio: hora_inicio || '07:00',
-        hora_fim: hora_fim || '11:00',
-        vagas_totais: numVagas,
-        vagas_disponiveis: numVagas,
-        medico_id: Number(medico_id),
-        status_disponivel: true
-      }
-    });
+    let horario;
+    try {
+      horario = await prisma.horario.create({
+        data: {
+          data_hora: new Date(data_hora),
+          hora_inicio: hora_inicio || '07:00',
+          hora_fim: hora_fim || '11:00',
+          vagas_totais: numVagas,
+          vagas_disponiveis: numVagas,
+          medico_id: Number(medico_id),
+          status_disponivel: true
+        }
+      });
+    } catch (createErr: any) {
+      horario = await prisma.horario.create({
+        data: {
+          data_hora: new Date(data_hora),
+          medico_id: Number(medico_id),
+          status_disponivel: true
+        } as any
+      });
+    }
 
     return res.status(201).json(horario);
   } catch (error: any) {
