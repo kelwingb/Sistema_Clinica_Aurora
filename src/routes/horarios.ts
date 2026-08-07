@@ -85,6 +85,11 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 
   const numVagas = Math.max(1, Number(vagas_totais) || 1);
 
+  let dateObj = new Date(data_hora);
+  if (isNaN(dateObj.getTime())) {
+    dateObj = new Date();
+  }
+
   try {
     const prisma = getPrisma();
     
@@ -101,7 +106,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
     try {
       horario = await prisma.horario.create({
         data: {
-          data_hora: new Date(data_hora),
+          data_hora: dateObj,
           hora_inicio: hora_inicio || '07:00',
           hora_fim: hora_fim || '11:00',
           vagas_totais: numVagas,
@@ -113,7 +118,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
     } catch (createErr: any) {
       horario = await prisma.horario.create({
         data: {
-          data_hora: new Date(data_hora),
+          data_hora: dateObj,
           medico_id: Number(medico_id),
           status_disponivel: true
         } as any
