@@ -4,11 +4,6 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 
 const router = Router();
 
-/**
- * GET /api/horarios
- * Público: Lista horários/turnos disponíveis ou filtrados por médico
- * Resiliente: funciona tanto com o schema novo (colunas extras) quanto com o legado
- */
 router.get('/', async (req: Request, res: Response) => {
   const { medico_id, apenas_disponiveis } = req.query;
 
@@ -26,7 +21,7 @@ router.get('/', async (req: Request, res: Response) => {
     };
 
     try {
-      // Tenta buscar incluindo agendamentos e status_disponivel (schema novo)
+  
       const fullWhere = { ...whereClause };
       if (apenas_disponiveis === 'true') {
         fullWhere.status_disponivel = true;
