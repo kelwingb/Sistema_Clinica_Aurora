@@ -35,10 +35,14 @@ model Medico {
 model Horario {
   id                Int           @id @default(autoincrement())
   data_hora         DateTime
+  hora_inicio       String        @default("07:00")
+  hora_fim          String        @default("11:00")
+  vagas_totais      Int           @default(1)
+  vagas_disponiveis Int           @default(1)
   medico_id         Int
   medico            Medico        @relation(fields: [medico_id], references: [id], onDelete: Cascade)
   status_disponivel Boolean       @default(true)
-  agendamento       Agendamento?
+  agendamentos      Agendamento[]
 
   @@map("Horarios")
 }
@@ -62,7 +66,7 @@ model Agendamento {
   serviceType           ServiceType @default(CONSULTA_MEDICA)
   data_preferencial     DateTime?
   
-  horario_id            Int?      @unique
+  horario_id            Int?
   horario               Horario?  @relation(fields: [horario_id], references: [id], onDelete: Cascade)
   
   paciente_id           Int?

@@ -329,19 +329,52 @@ export const PublicAgendar: React.FC = () => {
             
             {serviceType === 'CONSULTA_MEDICA' && (
               <div>
-                <h3 className="text-xs font-extrabold text-slate-700 uppercase mb-2">Selecione o Horário</h3>
-                <div className="grid grid-cols-2 gap-2.5 max-h-[200px] overflow-y-auto">
-                  {horariosDoMedico.map((hor: any) => (
-                    <button
-                      key={hor.id} type="button"
-                      onClick={() => setHorarioSelecionado(hor)}
-                      className={`p-3 rounded-xl border text-center ${horarioSelecionado?.id === hor.id ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white'}`}
-                    >
-                      <p className="text-xs font-bold text-slate-800">{formatarData(hor.data_hora)}</p>
-                      <p className="text-xs text-slate-600">{formatarHora(hor.data_hora)} hs</p>
-                    </button>
-                  ))}
-                  {horariosDoMedico.length === 0 && <p className="text-xs text-slate-500 col-span-2">Nenhum horário disponível.</p>}
+                <h3 className="text-xs font-extrabold text-slate-700 uppercase mb-2">Selecione o Turno / Horário</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[260px] overflow-y-auto pr-1">
+                  {horariosDoMedico.map((hor: any) => {
+                    const isEsgotado = hor.vagas_disponiveis <= 0 || !hor.status_disponivel;
+                    const isSelected = horarioSelecionado?.id === hor.id;
+
+                    return (
+                      <button
+                        key={hor.id} 
+                        type="button"
+                        disabled={isEsgotado}
+                        onClick={() => !isEsgotado && setHorarioSelecionado(hor)}
+                        className={`p-3.5 rounded-2xl border text-left transition-all ${
+                          isEsgotado
+                            ? 'border-slate-200 bg-slate-100 opacity-60 cursor-not-allowed'
+                            : isSelected
+                            ? 'border-emerald-600 bg-emerald-50/90 shadow-xs ring-2 ring-emerald-500/20'
+                            : 'border-slate-200 bg-white hover:border-[#0A2B2A]'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-1">
+                          <p className="text-xs font-bold text-[#0A2B2A]">{formatarData(hor.data_hora)}</p>
+                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                            isEsgotado 
+                              ? 'bg-red-100 text-red-700' 
+                              : hor.vagas_disponiveis === 1
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {isEsgotado ? 'Esgotado' : `${hor.vagas_disponiveis} vaga${hor.vagas_disponiveis > 1 ? 's' : ''}`}
+                          </span>
+                        </div>
+                        <p className="text-xs font-semibold text-slate-700">
+                          {hor.hora_inicio || '07:00'} às {hor.hora_fim || '11:00'} hs
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          {isEsgotado ? 'Sem vagas no momento' : `${hor.vagas_disponiveis} de ${hor.vagas_totais || 1} vagas livres`}
+                        </p>
+                      </button>
+                    );
+                  })}
+                  {horariosDoMedico.length === 0 && (
+                    <p className="text-xs text-slate-500 col-span-2 py-4 text-center border border-dashed rounded-xl">
+                      Nenhum turno com vagas liberadas para este médico.
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -373,7 +406,7 @@ export const PublicAgendar: React.FC = () => {
               </div>
             </div>
 
-            <button type="submit" disabled={isSubmitting} className="w-full bg-emerald-500 text-white font-bold py-3.5 rounded-xl shadow-md">
+            <button type="submit" disabled={isSubmitting} className="w-full bg-emerald-500 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-emerald-600 transition-all">
               {isSubmitting ? 'Aguarde...' : 'Confirmar Agendamento'}
             </button>
           </form>
@@ -395,7 +428,7 @@ export const PublicAgendar: React.FC = () => {
               {serviceType === 'CONSULTA_MEDICA' && (
                 <>
                   <p><strong>Médico:</strong> {agendamentoSucesso.horario?.medico?.nome}</p>
-                  <p><strong>Data & Hora:</strong> {formatarData(agendamentoSucesso.horario?.data_hora)} às {formatarHora(agendamentoSucesso.horario?.data_hora)} hs</p>
+                  <p><strong>Data & Turno:</strong> {formatarData(agendamentoSucesso.horario?.data_hora)} - das {agendamentoSucesso.horario?.hora_inicio || '07:00'} às {agendamentoSucesso.horario?.hora_fim || '11:00'} hs</p>
                 </>
               )}
               

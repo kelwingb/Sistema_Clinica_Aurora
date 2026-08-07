@@ -59,16 +59,22 @@ router.post('/', async (req: Request, res: Response) => {
       
       if (tipo === 'CONSULTA_MEDICA') {
         slot = await tx.horario.findUnique({
-          where: { id: Number(horario_id) },
-          include: { agendamento: true }
+          where: { id: Number(horario_id) }
         });
 
-        if (!slot) throw new Error('Horário inválido ou inexistente.');
-        if (!slot.status_disponivel || slot.agendamento) throw new Error('Este horário já foi reservado por outro paciente.');
+        if (!slot) throw new Error('Turno de atendimento inválido ou inexistente.');
+        if (!slot.status_disponivel || slot.vagas_disponiveis <= 0) {
+          throw new Error('As vagas para este turno de atendimento já foram esgotadas.');
+        }
+
+        const novasVagas = slot.vagas_disponiveis - 1;
 
         await tx.horario.update({
           where: { id: slot.id },
-          data: { status_disponivel: false }
+          data: { 
+            vagas_disponiveis: novasVagas,
+            status_disponivel: novasVagas > 0
+          }
         });
       }
 
@@ -129,7 +135,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 /**
  * DELETE /api/agendamentos/:id
- * Protegido: Cancela um agendamento e libera o horário no banco automaticamente
+ * Protegido: Cancela um agendamento e libera a vaga no turno correspondente
  */
 router.delete('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
@@ -146,21 +152,31 @@ router.delete('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Res
         throw new Error('Agendamento não localizado para cancelamento.');
       }
 
-      // Libera o horário associado se existir
+      // Libera a vaga no turno associado se existir
       if (agendamento.horario_id) {
-        await tx.horario.update({
-          where: { id: agendamento.horario_id },
-          data: { status_disponivel: true }
+        const slot = await tx.horario.findUnique({
+          where: { id: agendamento.horario_id }
         });
+
+        if (slot) {
+          const novasVagas = slot.vagas_disponiveis + 1;
+          await tx.horario.update({
+            where: { id: slot.id },
+            data: { 
+              vagas_disponiveis: novasVagas,
+              status_disponivel: true
+            }
+          });
+        }
       }
 
-      // Remove a filiação
+      // Remove o agendamento
       await tx.agendamento.delete({
         where: { id: agendamento.id }
       });
     });
 
-    return res.json({ success: true, message: 'Agendamento cancelado e horário liberado!' });
+    return res.json({ success: true, message: 'Agendamento cancelado e vaga devolvida ao turno!' });
   } catch (error: any) {
     console.error(`Erro ao cancelar agendamento ${id}:`, error);
     return res.status(500).json({ error: 'Erro de Cancelamento', message: error.message || 'Falha ao processar cancelamento.', details: error.message });
