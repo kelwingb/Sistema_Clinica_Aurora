@@ -104,11 +104,9 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return res.status(404).json({ error: 'Não encontrado', message: 'O médico indicado não existe.' });
     }
 
-// Guarda o último erro para diagnóstico caso todos os fallbacks falhem
     let lastError: any = null;
-    let horario;
+    let horario: any = null;
 
-    // Tenta inserir com todos os campos (schema novo)
     try {
       horario = await prisma.horario.create({
         data: {
@@ -123,36 +121,69 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       });
     } catch (createErr: any) {
       lastError = createErr;
-      console.warn('Falha no insert completo do horário, tentando insert intermediário:', createErr?.message);
+      console.warn('Falha no insert completo do horário, tentando fallback compatível com o schema do banco:', createErr?.message);
+
       try {
-        // Fallback 1: Sem status_disponivel (caso a coluna não exista no schema antigo)
-        horario = await prisma.horario.create({
-          data: {
-            data_hora: dateObj,
-            hora_inicio: hora_inicio || '07:00',
-            hora_fim: hora_fim || '11:00',
-            vagas_totais: numVagas,
-            vagas_disponiveis: numVagas,
-            medico_id: Number(medico_id)
-          } as any
-        });
-      } catch (err2: any) {
-        lastError = err2;
-        console.warn('Falha no insert intermediário, tentando insert mínimo total:', err2?.message);
+        const columns = await prisma.$queryRaw<Array<{ column_name: string }>>`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'Horarios'
+        `;
+
+        const availableColumns = new Set(columns.map((column) => column.column_name.toLowerCase()));
+        const insertData: Record<string, any> = {};
+
+        const addColumnValue = (columnName: string, value: any) => {
+          if (availableColumns.has(columnName.toLowerCase())) {
+            insertData[columnName] = value;
+          }
+        };
+
+        addColumnValue('data_hora', dateObj);
+        addColumnValue('hora_inicio', hora_inicio || '07:00');
+        addColumnValue('hora_fim', hora_fim || '11:00');
+        addColumnValue('vagas_totais', numVagas);
+        addColumnValue('vagas_disponiveis', numVagas);
+        addColumnValue('medico_id', Number(medico_id));
+        addColumnValue('status_disponivel', true);
+
+        if (Object.keys(insertData).length === 0) {
+          throw new Error('A tabela Horarios não possui colunas disponíveis para criação.');
+        }
+
+        const columnNames = Object.keys(insertData).map((column) => `"${column}"`).join(', ');
+        const placeholders = Object.keys(insertData).map((_, index) => `$${index + 1}`).join(', ');
+        const values = Object.values(insertData);
+
+        const insertSql = `
+          INSERT INTO "Horarios" (${columnNames})
+          VALUES (${placeholders})
+          RETURNING id, data_hora, medico_id, hora_inicio, hora_fim, vagas_totais, vagas_disponiveis, status_disponivel
+        `;
+
+        const rows = await prisma.$queryRawUnsafe(insertSql, ...values) as Array<any>;
+        horario = rows[0] ?? null;
+      } catch (fallbackErr: any) {
+        lastError = fallbackErr;
+        console.error('Falha no fallback compatível de inserção de horário:', fallbackErr?.message);
+
         try {
-          // Fallback 2: Apenas os campos essenciais (compatível com schema original)
           horario = await prisma.horario.create({
             data: {
               data_hora: dateObj,
               medico_id: Number(medico_id)
             } as any
           });
-        } catch (err3: any) {
-          lastError = err3;
-          console.error('TODOS os fallbacks de inserção de horário falharam:', err3);
-          throw err3;
+        } catch (minimalErr: any) {
+          lastError = minimalErr;
+          console.error('Falha no fallback mínimo de inserção de horário:', minimalErr?.message);
+          throw minimalErr;
         }
       }
+    }
+
+    if (!horario) {
+      throw lastError || new Error('Não foi possível criar o horário.');
     }
 
     return res.status(201).json(horario);
