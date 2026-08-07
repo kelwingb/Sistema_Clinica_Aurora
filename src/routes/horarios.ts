@@ -104,9 +104,12 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return res.status(404).json({ error: 'Não encontrado', message: 'O médico indicado não existe.' });
     }
 
+// Guarda o último erro para diagnóstico caso todos os fallbacks falhem
+    let lastError: any = null;
     let horario;
+
+    // Tenta inserir com todos os campos (schema novo)
     try {
-      // Tenta inserir com todos os campos (schema novo)
       horario = await prisma.horario.create({
         data: {
           data_hora: dateObj,
@@ -119,6 +122,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         }
       });
     } catch (createErr: any) {
+      lastError = createErr;
       console.warn('Falha no insert completo do horário, tentando insert intermediário:', createErr?.message);
       try {
         // Fallback 1: Sem status_disponivel (caso a coluna não exista no schema antigo)
@@ -133,21 +137,33 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
           } as any
         });
       } catch (err2: any) {
+        lastError = err2;
         console.warn('Falha no insert intermediário, tentando insert mínimo total:', err2?.message);
-        // Fallback 2: Apenas os campos essenciais (compatível com schema original)
-        horario = await prisma.horario.create({
-          data: {
-            data_hora: dateObj,
-            medico_id: Number(medico_id)
-          } as any
-        });
+        try {
+          // Fallback 2: Apenas os campos essenciais (compatível com schema original)
+          horario = await prisma.horario.create({
+            data: {
+              data_hora: dateObj,
+              medico_id: Number(medico_id)
+            } as any
+          });
+        } catch (err3: any) {
+          lastError = err3;
+          console.error('TODOS os fallbacks de inserção de horário falharam:', err3);
+          throw err3;
+        }
       }
     }
 
     return res.status(201).json(horario);
   } catch (error: any) {
     console.error('Erro ao criar horário:', error);
-    return res.status(500).json({ error: 'Erro de inserção', message: 'Não foi possível cadastrar o horário.', details: error.message });
+    return res.status(500).json({
+      error: 'Erro de inserção',
+      message: 'Não foi possível cadastrar o horário.',
+      details: error.message,
+      meta: error?.meta || null
+    });
   }
 });
 
