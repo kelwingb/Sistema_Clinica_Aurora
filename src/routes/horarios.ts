@@ -4,10 +4,6 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 
 const router = Router();
 
-/**
- * GET /api/horarios
- * Público: Lista horários/turnos disponíveis ou filtrados por médico
- */
 router.get('/', async (req: Request, res: Response) => {
   const { medico_id, apenas_disponiveis } = req.query;
 
