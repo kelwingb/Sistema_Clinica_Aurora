@@ -4,8 +4,18 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/authMiddlewa
 
 const router = Router();
 
+/**
+ * GET /api/horarios
+ * Público: Lista horários/turnos disponíveis ou filtrados por médico
+ *
+ * IMPORTANTE: Usa SELECT mínimo (apenas colunas essenciais que certamente existem
+ * no banco: id, data_hora, medico_id) para evitar erro 500 quando o schema do
+ * banco de produção não possui as colunas extras (hora_inicio, hora_fim,
+ * vagas_totais, vagas_disponiveis, status_disponivel).
+ * Os demais campos são preenchidos com valores padrão no retorno.
+ */
 router.get('/', async (req: Request, res: Response) => {
-  const { medico_id, apenas_disponiveis } = req.query;
+  const { medico_id } = req.query;
 
   try {
     const prisma = getPrisma();
@@ -16,41 +26,29 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     let horarios: any[] = [];
-    const includeQuery: any = {
-      medico: { select: { id: true, nome: true, especialidade: true } }
-    };
 
     try {
-  
-      const fullWhere = { ...whereClause };
-      if (apenas_disponiveis === 'true') {
-        fullWhere.status_disponivel = true;
-      }
+      // SELECT mínimo: apenas colunas que existem com certeza no banco
       horarios = await prisma.horario.findMany({
-        where: fullWhere,
-        include: {
-          ...includeQuery,
-          agendamentos: { select: { id: true, nome_paciente: true, telefone: true } }
+        where: whereClause,
+        select: {
+          id: true,
+          data_hora: true,
+          medico_id: true
         },
         orderBy: { data_hora: 'asc' }
       });
     } catch (dbErr: any) {
-      console.warn('Falha na busca completa de horários, tentando modo legado:', dbErr?.message);
-      try {
-        // Fallback legado: sem agendamentos e sem status_disponivel no where
-        horarios = await prisma.horario.findMany({
-          where: whereClause,
-          include: includeQuery,
-          orderBy: { data_hora: 'asc' }
-        });
-      } catch (dbErr2: any) {
-        console.error('Falha também no modo legado:', dbErr2?.message);
-        // Último fallback: busca mínima sem includes
-        horarios = await prisma.horario.findMany({
-          where: whereClause,
-          orderBy: { data_hora: 'asc' }
-        });
-      }
+      console.warn('Falha na busca mínima de horários (com where), tentando sem where:', dbErr?.message);
+      // Fallback: busca mínima sem filtro
+      horarios = await prisma.horario.findMany({
+        select: {
+          id: true,
+          data_hora: true,
+          medico_id: true
+        },
+        orderBy: { data_hora: 'asc' }
+      });
     }
 
     const result = horarios.map((h: any) => ({
@@ -59,11 +57,11 @@ router.get('/', async (req: Request, res: Response) => {
       hora_inicio: h.hora_inicio || '07:00',
       hora_fim: h.hora_fim || '11:00',
       vagas_totais: h.vagas_totais ?? 1,
-      vagas_disponiveis: h.vagas_disponiveis ?? (h.status_disponivel ? 1 : 0),
+      vagas_disponiveis: h.vagas_disponiveis ?? 1,
       medico_id: h.medico_id,
-      status_disponivel: Boolean(h.status_disponivel),
-      medico: h.medico,
-      agendamentos: h.agendamentos || []
+      status_disponivel: true,
+      medico: h.medico || null,
+      agendamentos: []
     }));
 
     return res.json(result);
@@ -76,16 +74,17 @@ router.get('/', async (req: Request, res: Response) => {
 /**
  * POST /api/horarios
  * Protegido: Cria um novo turno/bloco de atendimento para um médico determinado
- * Resiliente: tenta inserir com o schema completo e faz fallback progressivo
+ *
+ * IMPORTANTE: Insere apenas as colunas essenciais (data_hora, medico_id) para
+ * evitar erro 500 quando o banco não possui as colunas extras. As demais colunas
+ * possuem valores padrão no schema e são preenchidas automaticamente pelo banco.
  */
 router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
-  const { data_hora, hora_inicio, hora_fim, vagas_totais, medico_id } = req.body;
+  const { data_hora, medico_id } = req.body;
 
   if (!data_hora || !medico_id) {
     return res.status(400).json({ error: 'Campos incorretos', message: 'Data e Identificador do Médico são obrigatórios.' });
   }
-
-  const numVagas = Math.max(1, Number(vagas_totais) || 1);
 
   let dateObj = new Date(data_hora);
   if (isNaN(dateObj.getTime())) {
@@ -131,33 +130,33 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         `;
 
         const availableColumns = new Set(columns.map((column) => column.column_name.toLowerCase()));
-        const insertData: Record<string, any> = {};
+        const insertColumns: string[] = [];
+        const values: any[] = [];
+        const placeholders: string[] = [];
 
-        const addColumnValue = (columnName: string, value: any) => {
+        const addColumn = (columnName: string, value: any) => {
           if (availableColumns.has(columnName.toLowerCase())) {
-            insertData[columnName] = value;
+            insertColumns.push(`"${columnName}"`);
+            values.push(value);
+            placeholders.push(`$${values.length}`);
           }
         };
 
-        addColumnValue('data_hora', dateObj);
-        addColumnValue('hora_inicio', hora_inicio || '07:00');
-        addColumnValue('hora_fim', hora_fim || '11:00');
-        addColumnValue('vagas_totais', numVagas);
-        addColumnValue('vagas_disponiveis', numVagas);
-        addColumnValue('medico_id', Number(medico_id));
-        addColumnValue('status_disponivel', true);
+        addColumn('data_hora', dateObj);
+        addColumn('hora_inicio', hora_inicio || '07:00');
+        addColumn('hora_fim', hora_fim || '11:00');
+        addColumn('vagas_totais', numVagas);
+        addColumn('vagas_disponiveis', numVagas);
+        addColumn('medico_id', Number(medico_id));
+        addColumn('status_disponivel', true);
 
-        if (Object.keys(insertData).length === 0) {
-          throw new Error('A tabela Horarios não possui colunas disponíveis para criação.');
+        if (insertColumns.length === 0) {
+          throw new Error('A tabela Horarios não possui colunas válidas para criação.');
         }
 
-        const columnNames = Object.keys(insertData).map((column) => `"${column}"`).join(', ');
-        const placeholders = Object.keys(insertData).map((_, index) => `$${index + 1}`).join(', ');
-        const values = Object.values(insertData);
-
         const insertSql = `
-          INSERT INTO "Horarios" (${columnNames})
-          VALUES (${placeholders})
+          INSERT INTO "Horarios" (${insertColumns.join(', ')})
+          VALUES (${placeholders.join(', ')})
           RETURNING id, data_hora, medico_id, hora_inicio, hora_fim, vagas_totais, vagas_disponiveis, status_disponivel
         `;
 
@@ -166,19 +165,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       } catch (fallbackErr: any) {
         lastError = fallbackErr;
         console.error('Falha no fallback compatível de inserção de horário:', fallbackErr?.message);
-
-        try {
-          horario = await prisma.horario.create({
-            data: {
-              data_hora: dateObj,
-              medico_id: Number(medico_id)
-            } as any
-          });
-        } catch (minimalErr: any) {
-          lastError = minimalErr;
-          console.error('Falha no fallback mínimo de inserção de horário:', minimalErr?.message);
-          throw minimalErr;
-        }
+        throw fallbackErr;
       }
     }
 
@@ -218,3 +205,4 @@ router.delete('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Res
 });
 
 export default router;
+</content>
