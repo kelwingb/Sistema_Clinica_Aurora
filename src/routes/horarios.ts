@@ -103,25 +103,77 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return res.status(404).json({ error: 'Não encontrado', message: 'O médico indicado não existe.' });
     }
 
-// Insert mínimo: apenas colunas essenciais
-    // O objeto é tipado como any para contornar a checagem estrita do Prisma,
-    // pois algumas colunas podem não existir fisicamente no banco de produção.
-    const createData: any = {
-      data_hora: dateObj,
-      medico_id: Number(medico_id)
-    };
-    const horario = await prisma.horario.create({ data: createData });
+    let lastError: any = null;
+    let horario: any = null;
 
-    return res.status(201).json({
-      id: horario.id,
-      data_hora: horario.data_hora,
-      hora_inicio: horario.hora_inicio || '07:00',
-      hora_fim: horario.hora_fim || '11:00',
-      vagas_totais: horario.vagas_totais ?? 1,
-      vagas_disponiveis: horario.vagas_disponiveis ?? 1,
-      medico_id: horario.medico_id,
-      status_disponivel: true
-    });
+    try {
+      horario = await prisma.horario.create({
+        data: {
+          data_hora: dateObj,
+          hora_inicio: hora_inicio || '07:00',
+          hora_fim: hora_fim || '11:00',
+          vagas_totais: numVagas,
+          vagas_disponiveis: numVagas,
+          medico_id: Number(medico_id),
+          status_disponivel: true
+        }
+      });
+    } catch (createErr: any) {
+      lastError = createErr;
+      console.warn('Falha no insert completo do horário, tentando fallback compatível com o schema do banco:', createErr?.message);
+
+      try {
+        const columns = await prisma.$queryRaw<Array<{ column_name: string }>>`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'Horarios'
+        `;
+
+        const availableColumns = new Set(columns.map((column) => column.column_name.toLowerCase()));
+        const insertColumns: string[] = [];
+        const values: any[] = [];
+        const placeholders: string[] = [];
+
+        const addColumn = (columnName: string, value: any) => {
+          if (availableColumns.has(columnName.toLowerCase())) {
+            insertColumns.push(`"${columnName}"`);
+            values.push(value);
+            placeholders.push(`$${values.length}`);
+          }
+        };
+
+        addColumn('data_hora', dateObj);
+        addColumn('hora_inicio', hora_inicio || '07:00');
+        addColumn('hora_fim', hora_fim || '11:00');
+        addColumn('vagas_totais', numVagas);
+        addColumn('vagas_disponiveis', numVagas);
+        addColumn('medico_id', Number(medico_id));
+        addColumn('status_disponivel', true);
+
+        if (insertColumns.length === 0) {
+          throw new Error('A tabela Horarios não possui colunas válidas para criação.');
+        }
+
+        const insertSql = `
+          INSERT INTO "Horarios" (${insertColumns.join(', ')})
+          VALUES (${placeholders.join(', ')})
+          RETURNING id, data_hora, medico_id, hora_inicio, hora_fim, vagas_totais, vagas_disponiveis, status_disponivel
+        `;
+
+        const rows = await prisma.$queryRawUnsafe(insertSql, ...values) as Array<any>;
+        horario = rows[0] ?? null;
+      } catch (fallbackErr: any) {
+        lastError = fallbackErr;
+        console.error('Falha no fallback compatível de inserção de horário:', fallbackErr?.message);
+        throw fallbackErr;
+      }
+    }
+
+    if (!horario) {
+      throw lastError || new Error('Não foi possível criar o horário.');
+    }
+
+    return res.status(201).json(horario);
   } catch (error: any) {
     console.error('Erro ao criar horário:', error);
     return res.status(500).json({
